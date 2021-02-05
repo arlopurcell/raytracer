@@ -1,8 +1,6 @@
-extern crate image;
-extern crate nalgebra;
-
 use image::{Rgb, RgbImage};
 use nalgebra::Vector3;
+use rayon::prelude::*;
 
 const VIEWPORT_WIDTH: f32 = 1.;
 const VIEWPORT_HEIGHT: f32 = 1.;
@@ -12,7 +10,6 @@ const CANVAS_WIDTH: i32 = 800;
 const CANVAS_HEIGHT: i32 = 800;
 
 fn main() {
-    let mut image = RgbImage::new(CANVAS_WIDTH as u32, CANVAS_HEIGHT as u32);
     let camera = Vector3::new(0., 0., 0.);
 
     let mut scene = Scene::new(Vector3::new(1., 1., 1.));
@@ -49,14 +46,23 @@ fn main() {
         .lights
         .push(Light::Directional(0.2, Vector3::new(1., 4., 4.)));
 
+    let mut pixels = Vec::new();
     for x in -CANVAS_WIDTH / 2..CANVAS_WIDTH / 2 {
         for y in -CANVAS_HEIGHT / 2..CANVAS_HEIGHT / 2 {
-            let direction = canvas_to_viewport(x, y);
-            let color = scene.trace_ray(camera, direction, 1., f32::MAX);
-            put_pixel(&mut image, x, y, color);
+            pixels.push((x, y));
         }
     }
 
+    let pixels: Vec<_> = pixels.into_par_iter().map(|(x, y)| {
+        let direction = canvas_to_viewport(x, y);
+        let color = scene.trace_ray(camera, direction, 1., f32::MAX);
+        (x, y, color)
+    }).collect();
+
+    let mut image = RgbImage::new(CANVAS_WIDTH as u32, CANVAS_HEIGHT as u32);
+    for (x, y, color) in pixels {
+        put_pixel(&mut image, x, y, color);
+    }
     image.save("render.png").unwrap();
 }
 
@@ -174,6 +180,7 @@ struct Sphere {
 }
 
 impl Sphere {
+    #[cfg(test)]
     fn plain(center: Vector3<f32>, radius: f32) -> Self {
         Self::new(center, radius, Vector3::new(0., 0., 0.), None)
     }
