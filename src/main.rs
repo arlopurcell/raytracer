@@ -12,30 +12,34 @@ const CANVAS_HEIGHT: i32 = 800;
 fn main() {
     let camera = Vector3::new(0., 0., 0.);
 
-    let mut scene = Scene::new(Vector3::new(1., 1., 1.));
+    let mut scene = Scene::new(Vector3::new(0., 0., 0.));
     scene.spheres.push(Sphere::new(
         Vector3::new(0., -1., 3.),
         1.0,
         Vector3::new(1., 0., 0.),
         Some(500.),
+        0.2,
     ));
     scene.spheres.push(Sphere::new(
         Vector3::new(2., 0., 4.),
         1.0,
         Vector3::new(0., 0., 1.),
         Some(500.),
+        0.3,
     ));
     scene.spheres.push(Sphere::new(
         Vector3::new(-2., 0., 4.),
         1.0,
         Vector3::new(0., 1., 0.),
         Some(10.),
+        0.4,
     ));
     scene.spheres.push(Sphere::new(
         Vector3::new(0., -5001., 0.),
         5000.,
         Vector3::new(1., 1., 0.),
         Some(1000.),
+        0.5,
     ));
 
     scene.lights.push(Light::Ambient(0.2));
@@ -55,7 +59,7 @@ fn main() {
 
     let pixels: Vec<_> = pixels.into_par_iter().map(|(x, y)| {
         let direction = canvas_to_viewport(x, y);
-        let color = scene.trace_ray(&camera, &direction, 1., f32::MAX);
+        let color = scene.trace_ray(&camera, &direction, 1., f32::MAX, 3);
         (x, y, color)
     }).collect();
 
@@ -112,12 +116,21 @@ impl Scene {
         d: &Vector3<f32>,
         t_min: f32,
         t_max: f32,
+        depth: u8,
     ) -> Vector3<f32> {
         self.closest_intersection(o, d, t_min, t_max)
             .map(|(sphere, t)| {
                 let p = o + t * d;
                 let n = (p - sphere.center).normalize();
-                sphere.color * self.compute_lighting(&sphere.specular, &p, &n, &-d)
+                let local_color = sphere.color * self.compute_lighting(&sphere.specular, &p, &n, &-d);
+                if depth <= 0 || sphere.reflective <= 0. {
+                    local_color
+                } else {
+                    let r = reflect_ray(&-d, &n);
+                    let reflected_color = self.trace_ray(&p, &r, 0.001, f32::INFINITY, depth - 1);
+                    // weighted average of local and reflective colors
+                    local_color * (1. - sphere.reflective) + reflected_color * sphere.reflective
+                }
             })
             .unwrap_or(self.background)
     }
@@ -130,10 +143,10 @@ impl Scene {
                 Light::Point(i, position) => {
                     // looks like p is wrong somehow?
                     let l = position - p;
-                    compute_directional_light(i, specular, n, &l, v)
+                    self.compute_directional_light(i, specular, p, n, &l, v, 1.)
                 }
                 Light::Directional(i, direction) => {
-                    compute_directional_light(i, specular, n, direction, v)
+                    self.compute_directional_light(i, specular, p, n, direction, v, f32::INFINITY)
                 }
             })
             .sum()
@@ -161,20 +174,28 @@ impl Scene {
                 }
             })
     }
+
+    fn compute_directional_light(&self, i: &f32, specular: &Option<f32>, p: &Vector3<f32>, n: &Vector3<f32>, l: &Vector3<f32>, v: &Vector3<f32>, t_max: f32) -> f32 {
+        // If shadowed from light, no directional light
+        if let Some(_) = self.closest_intersection(p, l, 0.001, t_max) {
+            0.
+        } else {
+            let n_dot_l = n.dot(l).max(0.);
+            let diffuse = i * n_dot_l / (n.magnitude() * l.magnitude());
+            if let Some(specular) = specular {
+                let r = reflect_ray(l, n);
+                let r_dot_v = r.dot(v).max(0.);
+                let specular = i * (r_dot_v / (r.magnitude() * v.magnitude())).powf(*specular);
+                specular + diffuse
+            } else {
+                diffuse
+            }
+        }
+    }
 }
 
-
-fn compute_directional_light(i: &f32, specular: &Option<f32>, n: &Vector3<f32>, l: &Vector3<f32>, v: &Vector3<f32>) -> f32 {
-    let n_dot_l = n.dot(l).max(0.);
-    let diffuse = i * n_dot_l / (n.magnitude() * l.magnitude());
-    if let Some(specular) = specular {
-        let r = 2. * n * n.dot(l) - l;
-        let r_dot_v = r.dot(v).max(0.);
-        let specular = i * (r_dot_v / (r.magnitude() * v.magnitude())).powf(*specular);
-        specular + diffuse
-    } else {
-        diffuse
-    }
+fn reflect_ray(r: &Vector3<f32>, n: &Vector3<f32>) -> Vector3<f32> {
+    2. * n * n.dot(r) - r
 }
 
 struct Sphere {
@@ -182,20 +203,22 @@ struct Sphere {
     radius: f32,
     color: Vector3<f32>,
     specular: Option<f32>,
+    reflective: f32,
 }
 
 impl Sphere {
     #[cfg(test)]
     fn plain(center: Vector3<f32>, radius: f32) -> Self {
-        Self::new(center, radius, Vector3::new(0., 0., 0.), None)
+        Self::new(center, radius, Vector3::new(0., 0., 0.), None, 0.)
     }
 
-    fn new(center: Vector3<f32>, radius: f32, color: Vector3<f32>, specular: Option<f32>) -> Self {
+    fn new(center: Vector3<f32>, radius: f32, color: Vector3<f32>, specular: Option<f32>, reflective: f32) -> Self {
         Self {
             center,
             radius,
             color,
-            specular
+            specular,
+            reflective,
         }
     }
 
