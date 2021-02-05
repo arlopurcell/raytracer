@@ -20,27 +20,31 @@ fn main() {
         Vector3::new(0., -1., 3.),
         1.0,
         Vector3::new(1., 0., 0.),
+        Some(500.),
     ));
     scene.spheres.push(Sphere::new(
         Vector3::new(2., 0., 4.),
         1.0,
         Vector3::new(0., 0., 1.),
+        Some(500.),
     ));
     scene.spheres.push(Sphere::new(
         Vector3::new(-2., 0., 4.),
         1.0,
         Vector3::new(0., 1., 0.),
+        Some(10.),
     ));
     scene.spheres.push(Sphere::new(
         Vector3::new(0., -5001., 0.),
         5000.,
         Vector3::new(1., 1., 0.),
+        Some(1000.),
     ));
 
     scene.lights.push(Light::Ambient(0.2));
     scene
         .lights
-        .push(Light::Point(0.6, Vector3::new(0., 0., 0.)));
+        .push(Light::Point(0.6, Vector3::new(2., 1., 0.)));
     scene
         .lights
         .push(Light::Directional(0.2, Vector3::new(1., 4., 4.)));
@@ -64,9 +68,9 @@ fn put_pixel(image: &mut RgbImage, x: i32, y: i32, color: Vector3<f32>) {
             x as u32,
             y as u32,
             Rgb::from([
-                (color.x * 255.) as u8,
-                (color.y * 255.) as u8,
-                (color.z * 255.) as u8,
+                (color.x.min(1.).max(0.) * 255.) as u8,
+                (color.y.min(1.).max(0.) * 255.) as u8,
+                (color.z.min(1.).max(0.) * 255.) as u8,
             ]),
         );
     }
@@ -111,15 +115,6 @@ impl Scene {
                     .intersect_ray(&camera, &direction)
                     .filter(|t| *t > t_min && *t < t_max);
                 min_t.map(|t| (sphere, t))
-                /*
-                let min_or_nan = intersections.into_iter().filter(|t| *t > t_min && *t < t_max)
-                    .fold(f32::NAN, f32::max);
-                if min_or_nan.is_finite() {
-                    Some((sphere, min_or_nan))
-                } else {
-                    None
-                }
-                */
             })
             .fold(None, |acc, (sphere, t)| {
                 if let Some((_min_sphere, min_t)) = acc {
@@ -135,12 +130,12 @@ impl Scene {
             .map(|(sphere, t)| {
                 let p = camera + t * direction;
                 let n = (p - sphere.center).normalize();
-                sphere.color * self.compute_lighting(p, n)
+                sphere.color * self.compute_lighting(&sphere.specular, &p, &n, &direction)
             })
             .unwrap_or(self.background)
     }
 
-    fn compute_lighting(&self, p: Vector3<f32>, n: Vector3<f32>) -> f32 {
+    fn compute_lighting(&self, specular: &Option<f32>, p: &Vector3<f32>, n: &Vector3<f32>, d: &Vector3<f32>) -> f32 {
         self.lights
             .iter()
             .map(|light| match light {
@@ -148,16 +143,26 @@ impl Scene {
                 Light::Point(i, position) => {
                     // looks like p is wrong somehow?
                     let l = position - p;
-                    let n_dot_l = n.dot(&l).max(0.);
-                    i * n_dot_l / (n.magnitude() * l.magnitude())
+                    compute_directional_light(i, specular, n, &l, &-d)
                 }
                 Light::Directional(i, direction) => {
-                    let l = direction;
-                    let n_dot_l = n.dot(l).max(0.);
-                    i * n_dot_l / (n.magnitude() * l.magnitude())
+                    compute_directional_light(i, specular, n, direction, &-d)
                 }
             })
             .sum()
+    }
+}
+
+fn compute_directional_light(i: &f32, specular: &Option<f32>, n: &Vector3<f32>, l: &Vector3<f32>, v: &Vector3<f32>) -> f32 {
+    let n_dot_l = n.dot(l).max(0.);
+    let diffuse = i * n_dot_l / (n.magnitude() * l.magnitude());
+    if let Some(specular) = specular {
+        let r = 2. * n * n.dot(l) - l;
+        let r_dot_v = r.dot(v).max(0.);
+        let specular = i * (r_dot_v / (r.magnitude() * v.magnitude())).powf(*specular);
+        specular + diffuse
+    } else {
+        diffuse
     }
 }
 
@@ -165,14 +170,20 @@ struct Sphere {
     center: Vector3<f32>,
     radius: f32,
     color: Vector3<f32>,
+    specular: Option<f32>,
 }
 
 impl Sphere {
-    fn new(center: Vector3<f32>, radius: f32, color: Vector3<f32>) -> Self {
+    fn plain(center: Vector3<f32>, radius: f32) -> Self {
+        Self::new(center, radius, Vector3::new(0., 0., 0.), None)
+    }
+
+    fn new(center: Vector3<f32>, radius: f32, color: Vector3<f32>, specular: Option<f32>) -> Self {
         Self {
             center,
             radius,
             color,
+            specular
         }
     }
 
@@ -210,7 +221,7 @@ mod tests {
 
     #[test]
     fn test_sphere_intersect() {
-        let sphere = Sphere::new(Vector3::new(0., 0., 2.), 1., Vector3::new(0., 0., 0.));
+        let sphere = Sphere::plain(Vector3::new(0., 0., 2.), 1.);
         let camera = Vector3::new(0., 0., 0.);
         let direction = Vector3::new(0., 0., 1.);
 
