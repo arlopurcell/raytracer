@@ -2,39 +2,53 @@ use image::{Rgb, RgbImage};
 use nalgebra::{geometry::Rotation3, Vector3};
 use rayon::prelude::*;
 
-const VIEWPORT_WIDTH: f32 = 1.;
+const VIEWPORT_WIDTH: f32 = 2.;
 const VIEWPORT_HEIGHT: f32 = 1.;
 const VIEWPORT_DISTANCE: f32 = 1.;
 
-const CANVAS_WIDTH: i32 = 800;
+const CANVAS_WIDTH: i32 = 1800;
 const CANVAS_HEIGHT: i32 = 800;
 
 fn main() {
-    let camera = Vector3::new(2., 0., 0.);
+    let camera = Vector3::new(-0., 0., 0.);
     let camera_rotation = Rotation3::face_towards(
-        &Vector3::new(-0.5, 0., 1.), // direction
+        &Vector3::new(0., 0., 1.), // direction
         &Vector3::new(0., 1., 0.),   // up
     );
 
     let mut scene = Scene::new(Vector3::new(0., 0., 0.));
+    // red
     scene.objects.push(Object::new(
-        Shape::sphere(Vector3::new(0., -1., 3.), 1.0),
+        //Shape::sphere(Vector3::new(0., -1., 3.), 1.0),
+        Shape::Difference(
+            Box::new(Shape::sphere(Vector3::new(0., -1., 3.), 1.0)),
+            Box::new(Shape::sphere(Vector3::new(0., -0.5, 2.5), 0.5)),
+        ),
         Vector3::new(1., 0., 0.),
         Some(500.),
         0.2,
     ));
+
+    // blue
     scene.objects.push(Object::new(
         Shape::sphere(Vector3::new(2., 0., 4.), 1.0),
         Vector3::new(0., 0., 1.),
         Some(500.),
         0.3,
     ));
+
+    // green
     scene.objects.push(Object::new(
-        Shape::sphere(Vector3::new(-2., 0., 4.), 1.0),
+        Shape::Intersection(
+            Box::new(Shape::sphere(Vector3::new(-2., 0., 4.), 1.0)),
+            Box::new(Shape::sphere(Vector3::new(-1., 0., 4.), 1.0)),
+        ),
         Vector3::new(0., 1., 0.),
         Some(10.),
         0.4,
     ));
+
+    // yellow
     scene.objects.push(Object::new(
         Shape::sphere(Vector3::new(0., -5001., 0.), 5000.),
         Vector3::new(1., 1., 0.),
@@ -122,9 +136,9 @@ impl Scene {
         depth: u8,
     ) -> Vector3<f32> {
         self.closest_intersection(o, d, t_min, t_max)
-            .map(|(object, t)| {
-                let p = o + t * d;
-                let n = object.shape.normal(&p);
+            .map(|(object, intersection)| {
+                let p = o + intersection.t * d;
+                let n = intersection.normal;
                 let local_color =
                     object.color * self.compute_lighting(&object.specular, &p, &n, &-d);
                 if depth <= 0 || object.reflective <= 0. {
@@ -168,7 +182,7 @@ impl Scene {
         d: &Vector3<f32>,
         t_min: f32,
         t_max: f32,
-    ) -> Option<(&Object, f32)> {
+    ) -> Option<(&Object, Intersection)> {
         self.objects
             .iter()
             .filter_map(|object| {
@@ -176,18 +190,19 @@ impl Scene {
                 let min_t = object
                     .shape
                     .intersect_ray(&o, &d)
-                    .filter(|t| *t > t_min && *t < t_max);
+                    .map(|(t1, t2)| *t1.min(&t2))
+                    .filter(|intersection| intersection.t > t_min && intersection.t < t_max);
                 min_t.map(|t| (object, t))
             })
-            .fold(None, |acc, (sphere, t)| {
+            .fold(None, |acc, (object, intersection)| {
                 if let Some((_min_sphere, min_t)) = acc {
-                    if t < min_t {
-                        Some((sphere, t))
+                    if intersection.t < min_t.t {
+                        Some((object, intersection))
                     } else {
                         acc
                     }
                 } else {
-                    Some((sphere, t))
+                    Some((object, intersection))
                 }
             })
     }
@@ -233,6 +248,33 @@ struct Object {
 
 enum Shape {
     Sphere { center: Vector3<f32>, radius: f32 },
+    Union(Box<Shape>, Box<Shape>),
+    Intersection(Box<Shape>, Box<Shape>),
+    Difference(Box<Shape>, Box<Shape>),
+}
+
+#[derive(Copy, Clone)]
+struct Intersection{
+    t: f32,
+    normal: Vector3<f32>,
+}
+
+impl Intersection {
+    fn min<'a>(&'a self, other: &'a Self) -> &'a Self {
+        if self.t < other.t {
+            self
+        } else {
+            other
+        }
+    }
+
+    fn max<'a>(&'a self, other: &'a Self) -> &'a Self {
+        if self.t > other.t {
+            self
+        } else {
+            other
+        }
+    }
 }
 
 impl Shape {
@@ -240,33 +282,83 @@ impl Shape {
         Self::Sphere { center, radius }
     }
 
-    fn intersect_ray(&self, camera: &Vector3<f32>, direction: &Vector3<f32>) -> Option<f32> {
+    fn intersect_ray(&self, o: &Vector3<f32>, d: &Vector3<f32>) -> Option<(Intersection, Intersection)> {
         match self {
             Self::Sphere { center, radius } => {
-                let co = camera - center;
+                let co = o - center;
 
-                let a = direction.dot(direction);
-                let b = 2. * co.dot(direction);
+                let a = d.dot(d);
+                let b = 2. * co.dot(d);
                 let c = co.dot(&co) - radius * radius;
-                solve_quadratic_min(a, b, c)
+                solve_quadratic(a, b, c).map(|(t1, t2)| (
+                        Intersection{ t: t1, normal: (o + t1 * d) - center},
+                        Intersection{ t: t2, normal: (o + t2 * d) - center},
+                ))
+            }
+            Self::Union(a, b) => {
+                // TODO handle non-contiguous
+                let intersect_a = a.intersect_ray(o, d);
+                let intersect_b = b.intersect_ray(o, d);
+                if let Some((ta1, ta2)) = intersect_a {
+                    if let Some((tb1, tb2)) = intersect_b {
+                        let t1 = ta1.min(&ta2).min(&tb1).min(&tb2);
+                        let t2 = ta1.max(&ta2).max(&tb1).max(&tb2);
+                        Some((*t1, *t2))
+                    } else {
+                        intersect_a
+                    }
+                } else {
+                    intersect_b
+                }
+            }
+            Self::Intersection(a, b) => {
+                // TODO handle non-contiguous
+                let intersect_a = a.intersect_ray(o, d);
+                let intersect_b = b.intersect_ray(o, d);
+                if let Some((ta1, ta2)) = intersect_a {
+                    if let Some((tb1, tb2)) = intersect_b {
+                        let ta_min = ta1.min(&ta2);
+                        let ta_max = ta1.max(&ta2);
+                        let tb_min = tb1.min(&tb2);
+                        let tb_max = tb1.max(&tb2);
+                        Some((*ta_min.max(tb_min), *ta_max.min(tb_max)))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            Self::Difference(a, b) => {
+                // TODO handle encapsulated properly (should return non-contiguous range)
+                let intersect_a = a.intersect_ray(o, d);
+                let intersect_b = b.intersect_ray(o, d);
+                if let Some((ta1, ta2)) = intersect_a {
+                    if let Some((mut tb1, mut tb2)) = intersect_b {
+                        // Inverted normals for subtracted object
+                        tb1.normal = -tb1.normal;
+                        tb2.normal = -tb2.normal;
+                        let ta_min = ta1.min(&ta2);
+                        let ta_max = ta1.max(&ta2);
+                        let tb_min = tb1.min(&tb2);
+                        let tb_max = tb1.max(&tb2);
+                        if ta_min.t < tb_min.t {
+                            Some((*ta_min, *tb_min))
+                        } else {
+                            Some((*tb_max, *ta_max))
+                        }
+                    } else {
+                        intersect_a
+                    }
+                } else {
+                    None
+                }
             }
         }
-    }
-
-    fn normal(&self, p: &Vector3<f32>) -> Vector3<f32> {
-        match self {
-            Self::Sphere { center, radius: _radius } => p - center,
-        }
-        .normalize()
     }
 }
 
 impl Object {
-    #[cfg(test)]
-    fn plain(shape: Shape) -> Self {
-        Self::new(shape, Vector3::new(0., 0., 0.), None, 0.)
-    }
-
     fn new(shape: Shape, color: Vector3<f32>, specular: Option<f32>, reflective: f32) -> Self {
         Self {
             shape,
@@ -277,13 +369,13 @@ impl Object {
     }
 }
 
-fn solve_quadratic_min(a: f32, b: f32, c: f32) -> Option<f32> {
+fn solve_quadratic(a: f32, b: f32, c: f32) -> Option<(f32, f32)>  {
     let discriminant = b * b - 4. * a * c;
     let disc_sqrt = discriminant.sqrt();
     if !disc_sqrt.is_nan() {
         let root1 = (-b + disc_sqrt) / (2. * a);
         let root2 = (-b - disc_sqrt) / (2. * a);
-        Some(root1.min(root2))
+        Some((root1, root2))
     } else {
         None
     }
@@ -293,28 +385,4 @@ enum Light {
     Ambient(f32),
     Point(f32, Vector3<f32>),
     Directional(f32, Vector3<f32>),
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_sphere_intersect() {
-        let sphere = Sphere::plain(Vector3::new(0., 0., 2.), 1.);
-        let camera = Vector3::new(0., 0., 0.);
-        let direction = Vector3::new(0., 0., 1.);
-
-        let t = sphere.intersect_ray(&camera, &direction);
-        assert_eq!(Some(1.), t);
-
-        let p = camera + direction;
-        let n = (p - sphere.center).normalize();
-        assert_eq!(Vector3::new(0., 0., -1.), n);
-    }
-
-    #[test]
-    fn test_quad_solve() {
-        assert_eq!(Some(-4.), solve_quadratic_min(1., 1., -12.));
-    }
 }
