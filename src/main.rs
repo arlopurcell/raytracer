@@ -55,7 +55,7 @@ fn main() {
 
     let pixels: Vec<_> = pixels.into_par_iter().map(|(x, y)| {
         let direction = canvas_to_viewport(x, y);
-        let color = scene.trace_ray(camera, direction, 1., f32::MAX);
+        let color = scene.trace_ray(&camera, &direction, 1., f32::MAX);
         (x, y, color)
     }).collect();
 
@@ -108,17 +108,44 @@ impl Scene {
 
     fn trace_ray(
         &self,
-        camera: Vector3<f32>,
-        direction: Vector3<f32>,
+        o: &Vector3<f32>,
+        d: &Vector3<f32>,
         t_min: f32,
         t_max: f32,
     ) -> Vector3<f32> {
+        self.closest_intersection(o, d, t_min, t_max)
+            .map(|(sphere, t)| {
+                let p = o + t * d;
+                let n = (p - sphere.center).normalize();
+                sphere.color * self.compute_lighting(&sphere.specular, &p, &n, &-d)
+            })
+            .unwrap_or(self.background)
+    }
+
+    fn compute_lighting(&self, specular: &Option<f32>, p: &Vector3<f32>, n: &Vector3<f32>, v: &Vector3<f32>) -> f32 {
+        self.lights
+            .iter()
+            .map(|light| match light {
+                Light::Ambient(i) => *i,
+                Light::Point(i, position) => {
+                    // looks like p is wrong somehow?
+                    let l = position - p;
+                    compute_directional_light(i, specular, n, &l, v)
+                }
+                Light::Directional(i, direction) => {
+                    compute_directional_light(i, specular, n, direction, v)
+                }
+            })
+            .sum()
+    }
+
+    fn closest_intersection(&self, o: &Vector3<f32>, d: &Vector3<f32>, t_min: f32, t_max: f32) -> Option<(&Sphere, f32)> {
         self.spheres
             .iter()
             .filter_map(|sphere| {
                 //let intersections = sphere.intersect_ray(&camera, &direction);
                 let min_t = sphere
-                    .intersect_ray(&camera, &direction)
+                    .intersect_ray(&o, &d)
                     .filter(|t| *t > t_min && *t < t_max);
                 min_t.map(|t| (sphere, t))
             })
@@ -133,31 +160,9 @@ impl Scene {
                     Some((sphere, t))
                 }
             })
-            .map(|(sphere, t)| {
-                let p = camera + t * direction;
-                let n = (p - sphere.center).normalize();
-                sphere.color * self.compute_lighting(&sphere.specular, &p, &n, &direction)
-            })
-            .unwrap_or(self.background)
-    }
-
-    fn compute_lighting(&self, specular: &Option<f32>, p: &Vector3<f32>, n: &Vector3<f32>, d: &Vector3<f32>) -> f32 {
-        self.lights
-            .iter()
-            .map(|light| match light {
-                Light::Ambient(i) => *i,
-                Light::Point(i, position) => {
-                    // looks like p is wrong somehow?
-                    let l = position - p;
-                    compute_directional_light(i, specular, n, &l, &-d)
-                }
-                Light::Directional(i, direction) => {
-                    compute_directional_light(i, specular, n, direction, &-d)
-                }
-            })
-            .sum()
     }
 }
+
 
 fn compute_directional_light(i: &f32, specular: &Option<f32>, n: &Vector3<f32>, l: &Vector3<f32>, v: &Vector3<f32>) -> f32 {
     let n_dot_l = n.dot(l).max(0.);
