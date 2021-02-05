@@ -10,7 +10,7 @@ const CANVAS_WIDTH: i32 = 1800;
 const CANVAS_HEIGHT: i32 = 800;
 
 fn main() {
-    let camera = Vector3::new(-0., 0., 0.);
+    let camera = Vector3::new(0., 0., -0.5);
     let camera_rotation = Rotation3::face_towards(
         &Vector3::new(0., 0., 1.), // direction
         &Vector3::new(0., 1., 0.),   // up
@@ -22,11 +22,13 @@ fn main() {
         //Shape::sphere(Vector3::new(0., -1., 3.), 1.0),
         Shape::Difference(
             Box::new(Shape::sphere(Vector3::new(0., -1., 3.), 1.0)),
-            Box::new(Shape::sphere(Vector3::new(0., -0.5, 2.5), 0.5)),
+            Box::new(Shape::sphere(Vector3::new(0.3, -0.5, 2.5), 0.4)),
         ),
         Vector3::new(1., 0., 0.),
         Some(500.),
         0.2,
+        0.,
+        1.33,
     ));
 
     // blue
@@ -35,17 +37,21 @@ fn main() {
         Vector3::new(0., 0., 1.),
         Some(500.),
         0.3,
+        0.,
+        1.33,
     ));
 
     // green
     scene.objects.push(Object::new(
         Shape::Intersection(
             Box::new(Shape::sphere(Vector3::new(-2., 0., 4.), 1.0)),
-            Box::new(Shape::sphere(Vector3::new(-1., 0., 4.), 1.0)),
+            Box::new(Shape::sphere(Vector3::new(-3., 0., 3.), 1.0)),
         ),
         Vector3::new(0., 1., 0.),
         Some(10.),
-        0.4,
+        0.2,
+        0.,
+        1.33,
     ));
 
     // yellow
@@ -54,6 +60,38 @@ fn main() {
         Vector3::new(1., 1., 0.),
         Some(1000.),
         0.5,
+        0.,
+        1.33,
+    ));
+
+    // clear ball
+    scene.objects.push(Object::new(
+        Shape::sphere(Vector3::new(0.75, -0.5, 1.8), 0.25),
+        Vector3::new(1., 1., 1.),
+        Some(10.),
+        0.0,
+        0.8,
+        1.33,
+    ));
+
+    // clear ball stand
+    scene.objects.push(Object::new(
+        Shape::sphere(Vector3::new(0.75, -1.75, 1.8), 1.),
+        Vector3::new(1., 0.6, 0.),
+        Some(10.),
+        0.0,
+        0.,
+        1.33,
+    ));
+
+    // mirror ball
+    scene.objects.push(Object::new(
+        Shape::sphere(Vector3::new(-1.5, 1., 6.), 2.),
+        Vector3::new(1., 1., 1.),
+        Some(10.),
+        0.9,
+        0.,
+        1.33,
     ));
 
     scene.lights.push(Light::Ambient(0.2));
@@ -75,7 +113,7 @@ fn main() {
         .into_par_iter()
         .map(|(x, y)| {
             let direction = camera_rotation * canvas_to_viewport(x, y);
-            let color = scene.trace_ray(&camera, &direction, 1., f32::MAX, 3);
+            let color = scene.trace_ray(&camera, &direction, 1., f32::MAX, 1.0, 3);
             (x, y, color)
         })
         .collect();
@@ -133,6 +171,7 @@ impl Scene {
         d: &Vector3<f32>,
         t_min: f32,
         t_max: f32,
+        refraction: f32,
         depth: u8,
     ) -> Vector3<f32> {
         self.closest_intersection(o, d, t_min, t_max)
@@ -141,13 +180,29 @@ impl Scene {
                 let n = intersection.normal;
                 let local_color =
                     object.color * self.compute_lighting(&object.specular, &p, &n, &-d);
-                if depth <= 0 || object.reflective <= 0. {
+                if depth <= 0 {
                     local_color
                 } else {
                     let r = reflect_ray(&-d, &n);
-                    let reflected_color = self.trace_ray(&p, &r, 0.001, f32::INFINITY, depth - 1);
-                    // weighted average of local and reflective colors
-                    local_color * (1. - object.reflective) + reflected_color * object.reflective
+                    let reflected_term = if object.reflection > 0. {
+                        object.reflection * self.trace_ray(&p, &r, 0.001, f32::INFINITY, refraction, depth - 1)
+                    } else {
+                        Vector3::new(0., 0., 0.)
+                    };
+
+                    let refracted_term = if object.transparency > 0. {
+                        let r = refraction / object.refraction;
+                        let c = (-n).dot(d);
+                        let refraction_direction =  r * d + (r * c - (1.- r*r * (1. - c*c))) * n;
+
+                        let refracted_color = self.trace_ray(&p, &refraction_direction, 0.001, f32::INFINITY, object.refraction, depth - 1);
+                        refracted_color * object.transparency
+                    } else {
+                        Vector3::new(0., 0., 0.)
+                    };
+
+                    // weighted average of local, reflective, and refractive colors
+                    local_color * (1. - object.reflection - object.transparency) + reflected_term + refracted_term
                 }
             })
             .unwrap_or(self.background)
@@ -217,20 +272,26 @@ impl Scene {
         v: &Vector3<f32>,
         t_max: f32,
     ) -> f32 {
-        // If shadowed from light, no directional light
-        if let Some(_) = self.closest_intersection(p, l, 0.001, t_max) {
-            0.
+        // If shadowed from light, less directional light
+        let shadower_transparency = if let Some((object, _intersection)) = self.closest_intersection(p, l, 0.001, t_max) {
+            object.transparency
         } else {
+            1.
+        };
+        if shadower_transparency > 0. {
             let n_dot_l = n.dot(l).max(0.);
             let diffuse = i * n_dot_l / (n.magnitude() * l.magnitude());
-            if let Some(specular) = specular {
+            let light = if let Some(specular) = specular {
                 let r = reflect_ray(l, n);
                 let r_dot_v = r.dot(v).max(0.);
                 let specular = i * (r_dot_v / (r.magnitude() * v.magnitude())).powf(*specular);
                 specular + diffuse
             } else {
                 diffuse
-            }
+            };
+            light * shadower_transparency
+        } else {
+            0.
         }
     }
 }
@@ -243,7 +304,9 @@ struct Object {
     shape: Shape,
     color: Vector3<f32>,
     specular: Option<f32>,
-    reflective: f32,
+    reflection: f32,
+    transparency: f32,
+    refraction: f32,
 }
 
 enum Shape {
@@ -283,6 +346,7 @@ impl Shape {
     }
 
     fn intersect_ray(&self, o: &Vector3<f32>, d: &Vector3<f32>) -> Option<(Intersection, Intersection)> {
+        // TODO something weird happens when the camera is inside the shape.
         match self {
             Self::Sphere { center, radius } => {
                 let co = o - center;
@@ -359,12 +423,14 @@ impl Shape {
 }
 
 impl Object {
-    fn new(shape: Shape, color: Vector3<f32>, specular: Option<f32>, reflective: f32) -> Self {
+    fn new(shape: Shape, color: Vector3<f32>, specular: Option<f32>, reflection: f32, transparency: f32, refraction: f32) -> Self {
         Self {
             shape,
             color,
             specular,
-            reflective,
+            reflection,
+            transparency,
+            refraction,
         }
     }
 }
