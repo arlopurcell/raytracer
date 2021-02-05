@@ -1,5 +1,8 @@
 use image::{Rgb, RgbImage};
-use nalgebra::Vector3;
+use nalgebra::{
+    Vector3,
+    geometry::Rotation3,
+};
 use rayon::prelude::*;
 
 const VIEWPORT_WIDTH: f32 = 1.;
@@ -10,7 +13,11 @@ const CANVAS_WIDTH: i32 = 800;
 const CANVAS_HEIGHT: i32 = 800;
 
 fn main() {
-    let camera = Vector3::new(0., 0., 0.);
+    let camera = Vector3::new(2., 0., 0.);
+    let camera_rotation = Rotation3::face_towards(
+        &Vector3::new(-0.5, 0., 1.), // direction
+        &Vector3::new(0., 1., 0.), // up
+    );
 
     let mut scene = Scene::new(Vector3::new(0., 0., 0.));
     scene.spheres.push(Sphere::new(
@@ -58,7 +65,7 @@ fn main() {
     }
 
     let pixels: Vec<_> = pixels.into_par_iter().map(|(x, y)| {
-        let direction = canvas_to_viewport(x, y);
+        let direction = camera_rotation * canvas_to_viewport(x, y);
         let color = scene.trace_ray(&camera, &direction, 1., f32::MAX, 3);
         (x, y, color)
     }).collect();
