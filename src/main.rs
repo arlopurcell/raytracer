@@ -1,8 +1,5 @@
 use image::{Rgb, RgbImage};
-use nalgebra::{
-    Vector3,
-    geometry::Rotation3,
-};
+use nalgebra::{geometry::Rotation3, Vector3};
 use rayon::prelude::*;
 
 const VIEWPORT_WIDTH: f32 = 1.;
@@ -16,34 +13,30 @@ fn main() {
     let camera = Vector3::new(2., 0., 0.);
     let camera_rotation = Rotation3::face_towards(
         &Vector3::new(-0.5, 0., 1.), // direction
-        &Vector3::new(0., 1., 0.), // up
+        &Vector3::new(0., 1., 0.),   // up
     );
 
     let mut scene = Scene::new(Vector3::new(0., 0., 0.));
-    scene.spheres.push(Sphere::new(
-        Vector3::new(0., -1., 3.),
-        1.0,
+    scene.objects.push(Object::new(
+        Shape::sphere(Vector3::new(0., -1., 3.), 1.0),
         Vector3::new(1., 0., 0.),
         Some(500.),
         0.2,
     ));
-    scene.spheres.push(Sphere::new(
-        Vector3::new(2., 0., 4.),
-        1.0,
+    scene.objects.push(Object::new(
+        Shape::sphere(Vector3::new(2., 0., 4.), 1.0),
         Vector3::new(0., 0., 1.),
         Some(500.),
         0.3,
     ));
-    scene.spheres.push(Sphere::new(
-        Vector3::new(-2., 0., 4.),
-        1.0,
+    scene.objects.push(Object::new(
+        Shape::sphere(Vector3::new(-2., 0., 4.), 1.0),
         Vector3::new(0., 1., 0.),
         Some(10.),
         0.4,
     ));
-    scene.spheres.push(Sphere::new(
-        Vector3::new(0., -5001., 0.),
-        5000.,
+    scene.objects.push(Object::new(
+        Shape::sphere(Vector3::new(0., -5001., 0.), 5000.),
         Vector3::new(1., 1., 0.),
         Some(1000.),
         0.5,
@@ -64,11 +57,14 @@ fn main() {
         }
     }
 
-    let pixels: Vec<_> = pixels.into_par_iter().map(|(x, y)| {
-        let direction = camera_rotation * canvas_to_viewport(x, y);
-        let color = scene.trace_ray(&camera, &direction, 1., f32::MAX, 3);
-        (x, y, color)
-    }).collect();
+    let pixels: Vec<_> = pixels
+        .into_par_iter()
+        .map(|(x, y)| {
+            let direction = camera_rotation * canvas_to_viewport(x, y);
+            let color = scene.trace_ray(&camera, &direction, 1., f32::MAX, 3);
+            (x, y, color)
+        })
+        .collect();
 
     let mut image = RgbImage::new(CANVAS_WIDTH as u32, CANVAS_HEIGHT as u32);
     for (x, y, color) in pixels {
@@ -103,7 +99,7 @@ fn canvas_to_viewport(x: i32, y: i32) -> Vector3<f32> {
 
 #[derive(Default)]
 struct Scene {
-    spheres: Vec<Sphere>,
+    objects: Vec<Object>,
     lights: Vec<Light>,
     background: Vector3<f32>,
 }
@@ -111,7 +107,7 @@ struct Scene {
 impl Scene {
     fn new(background: Vector3<f32>) -> Self {
         Self {
-            spheres: Vec::new(),
+            objects: Vec::new(),
             lights: Vec::new(),
             background,
         }
@@ -126,23 +122,30 @@ impl Scene {
         depth: u8,
     ) -> Vector3<f32> {
         self.closest_intersection(o, d, t_min, t_max)
-            .map(|(sphere, t)| {
+            .map(|(object, t)| {
                 let p = o + t * d;
-                let n = (p - sphere.center).normalize();
-                let local_color = sphere.color * self.compute_lighting(&sphere.specular, &p, &n, &-d);
-                if depth <= 0 || sphere.reflective <= 0. {
+                let n = object.shape.normal(&p);
+                let local_color =
+                    object.color * self.compute_lighting(&object.specular, &p, &n, &-d);
+                if depth <= 0 || object.reflective <= 0. {
                     local_color
                 } else {
                     let r = reflect_ray(&-d, &n);
                     let reflected_color = self.trace_ray(&p, &r, 0.001, f32::INFINITY, depth - 1);
                     // weighted average of local and reflective colors
-                    local_color * (1. - sphere.reflective) + reflected_color * sphere.reflective
+                    local_color * (1. - object.reflective) + reflected_color * object.reflective
                 }
             })
             .unwrap_or(self.background)
     }
 
-    fn compute_lighting(&self, specular: &Option<f32>, p: &Vector3<f32>, n: &Vector3<f32>, v: &Vector3<f32>) -> f32 {
+    fn compute_lighting(
+        &self,
+        specular: &Option<f32>,
+        p: &Vector3<f32>,
+        n: &Vector3<f32>,
+        v: &Vector3<f32>,
+    ) -> f32 {
         self.lights
             .iter()
             .map(|light| match light {
@@ -159,15 +162,22 @@ impl Scene {
             .sum()
     }
 
-    fn closest_intersection(&self, o: &Vector3<f32>, d: &Vector3<f32>, t_min: f32, t_max: f32) -> Option<(&Sphere, f32)> {
-        self.spheres
+    fn closest_intersection(
+        &self,
+        o: &Vector3<f32>,
+        d: &Vector3<f32>,
+        t_min: f32,
+        t_max: f32,
+    ) -> Option<(&Object, f32)> {
+        self.objects
             .iter()
-            .filter_map(|sphere| {
+            .filter_map(|object| {
                 //let intersections = sphere.intersect_ray(&camera, &direction);
-                let min_t = sphere
+                let min_t = object
+                    .shape
                     .intersect_ray(&o, &d)
                     .filter(|t| *t > t_min && *t < t_max);
-                min_t.map(|t| (sphere, t))
+                min_t.map(|t| (object, t))
             })
             .fold(None, |acc, (sphere, t)| {
                 if let Some((_min_sphere, min_t)) = acc {
@@ -182,7 +192,16 @@ impl Scene {
             })
     }
 
-    fn compute_directional_light(&self, i: &f32, specular: &Option<f32>, p: &Vector3<f32>, n: &Vector3<f32>, l: &Vector3<f32>, v: &Vector3<f32>, t_max: f32) -> f32 {
+    fn compute_directional_light(
+        &self,
+        i: &f32,
+        specular: &Option<f32>,
+        p: &Vector3<f32>,
+        n: &Vector3<f32>,
+        l: &Vector3<f32>,
+        v: &Vector3<f32>,
+        t_max: f32,
+    ) -> f32 {
         // If shadowed from light, no directional light
         if let Some(_) = self.closest_intersection(p, l, 0.001, t_max) {
             0.
@@ -205,37 +224,56 @@ fn reflect_ray(r: &Vector3<f32>, n: &Vector3<f32>) -> Vector3<f32> {
     2. * n * n.dot(r) - r
 }
 
-struct Sphere {
-    center: Vector3<f32>,
-    radius: f32,
+struct Object {
+    shape: Shape,
     color: Vector3<f32>,
     specular: Option<f32>,
     reflective: f32,
 }
 
-impl Sphere {
-    #[cfg(test)]
-    fn plain(center: Vector3<f32>, radius: f32) -> Self {
-        Self::new(center, radius, Vector3::new(0., 0., 0.), None, 0.)
+enum Shape {
+    Sphere { center: Vector3<f32>, radius: f32 },
+}
+
+impl Shape {
+    fn sphere(center: Vector3<f32>, radius: f32) -> Self {
+        Self::Sphere { center, radius }
     }
 
-    fn new(center: Vector3<f32>, radius: f32, color: Vector3<f32>, specular: Option<f32>, reflective: f32) -> Self {
+    fn intersect_ray(&self, camera: &Vector3<f32>, direction: &Vector3<f32>) -> Option<f32> {
+        match self {
+            Self::Sphere { center, radius } => {
+                let co = camera - center;
+
+                let a = direction.dot(direction);
+                let b = 2. * co.dot(direction);
+                let c = co.dot(&co) - radius * radius;
+                solve_quadratic_min(a, b, c)
+            }
+        }
+    }
+
+    fn normal(&self, p: &Vector3<f32>) -> Vector3<f32> {
+        match self {
+            Self::Sphere { center, radius: _radius } => p - center,
+        }
+        .normalize()
+    }
+}
+
+impl Object {
+    #[cfg(test)]
+    fn plain(shape: Shape) -> Self {
+        Self::new(shape, Vector3::new(0., 0., 0.), None, 0.)
+    }
+
+    fn new(shape: Shape, color: Vector3<f32>, specular: Option<f32>, reflective: f32) -> Self {
         Self {
-            center,
-            radius,
+            shape,
             color,
             specular,
             reflective,
         }
-    }
-
-    fn intersect_ray(&self, camera: &Vector3<f32>, direction: &Vector3<f32>) -> Option<f32> {
-        let co = camera - self.center;
-
-        let a = direction.dot(direction);
-        let b = 2. * co.dot(direction);
-        let c = co.dot(&co) - self.radius * self.radius;
-        solve_quadratic_min(a, b, c)
     }
 }
 
