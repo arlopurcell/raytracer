@@ -1,6 +1,7 @@
 use image::{Rgb, RgbImage};
 use nalgebra::{geometry::Rotation3, Vector3};
 use rayon::prelude::*;
+use std::cmp::Ordering;
 
 const VIEWPORT_WIDTH: f32 = 2.;
 const VIEWPORT_HEIGHT: f32 = 1.;
@@ -10,13 +11,14 @@ const CANVAS_WIDTH: i32 = 1800;
 const CANVAS_HEIGHT: i32 = 800;
 
 fn main() {
-    let camera = Vector3::new(0., 0., -0.5);
+    let camera = Vector3::new(0., 0., -1.);
     let camera_rotation = Rotation3::face_towards(
         &Vector3::new(0., 0., 1.), // direction
         &Vector3::new(0., 1., 0.),   // up
     );
 
     let mut scene = Scene::new(Vector3::new(0., 0., 0.));
+    /*
     // red
     scene.objects.push(Object::new(
         //Shape::sphere(Vector3::new(0., -1., 3.), 1.0),
@@ -56,7 +58,7 @@ fn main() {
 
     // yellow
     scene.objects.push(Object::new(
-        Shape::sphere(Vector3::new(0., -5001., 0.), 5000.),
+        Shape::half_space(Vector3::new(0., 1., 0.), -1.),
         Vector3::new(1., 1., 0.),
         Some(1000.),
         0.5,
@@ -90,6 +92,43 @@ fn main() {
         Vector3::new(1., 1., 1.),
         Some(10.),
         0.9,
+        0.,
+        1.33,
+    ));
+    */
+
+        /*
+    scene.objects.push(Object::new(
+        Shape::sphere(Vector3::new(0., 0., 2.), 1.0),
+        Vector3::new(0., 0., 1.),
+        Some(500.),
+        0.3,
+        0.,
+        1.33,
+    ));
+    scene.objects.push(Object::new(
+        Shape::half_space(Vector3::new(1., 0., 0.).normalize(), 0.5),
+        Vector3::new(1., 1., 1.),
+        Some(500.),
+        0.3,
+        0.,
+        1.33,
+    ));
+    */
+
+    // cube
+    scene.objects.push(Object::new(
+        Shape::sphere(Vector3::new(0., 0., 2.), 9.)
+            .difference(Shape::half_space(Vector3::new(1., 0., 0.), -0.5))
+            .difference(Shape::half_space(Vector3::new(-1., 0., 0.), -0.5))
+            .difference(Shape::half_space(Vector3::new(0., 1., 0.), -0.5))
+            .difference(Shape::half_space(Vector3::new(0., -1., 0.), -0.5))
+            .difference(Shape::half_space(Vector3::new(0., 0., 1.), 1.5))
+            .difference(Shape::half_space(Vector3::new(0., 0., -1.), -2.5))
+        ,
+        Vector3::new(1., 1., 0.),
+        Some(1000.),
+        0.5,
         0.,
         1.33,
     ));
@@ -242,16 +281,14 @@ impl Scene {
             .iter()
             .filter_map(|object| {
                 //let intersections = sphere.intersect_ray(&camera, &direction);
-                let min_t = object
+                object
                     .shape
-                    .intersect_ray(&o, &d)
-                    .map(|(t1, t2)| *t1.min(&t2))
-                    .filter(|intersection| intersection.t > t_min && intersection.t < t_max);
-                min_t.map(|t| (object, t))
+                    .intersect_ray(&o, &d, t_min, t_max)
+                    .map(|t| (object, t))
             })
             .fold(None, |acc, (object, intersection)| {
-                if let Some((_min_sphere, min_t)) = acc {
-                    if intersection.t < min_t.t {
+                if let Some((_min_object, min_i)) = acc {
+                    if intersection.t < min_i.t {
                         Some((object, intersection))
                     } else {
                         acc
@@ -311,41 +348,73 @@ struct Object {
 
 enum Shape {
     Sphere { center: Vector3<f32>, radius: f32 },
+    HalfSpace { normal: Vector3<f32>, distance: f32 },
     Union(Box<Shape>, Box<Shape>),
     Intersection(Box<Shape>, Box<Shape>),
     Difference(Box<Shape>, Box<Shape>),
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 struct Intersection{
     t: f32,
     normal: Vector3<f32>,
+    entering: bool,
 }
 
 impl Intersection {
-    fn min<'a>(&'a self, other: &'a Self) -> &'a Self {
-        if self.t < other.t {
-            self
-        } else {
-            other
-        }
-    }
-
-    fn max<'a>(&'a self, other: &'a Self) -> &'a Self {
-        if self.t > other.t {
-            self
-        } else {
-            other
-        }
+    fn invert(self) -> Self {
+        Intersection {t: self.t, normal: -self.normal, entering: !self.entering}
     }
 }
+
+/*
+impl Ord for Intersection {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.t.partial_cmp(&other.t).unwrap_or(Ordering::Equal)
+    }
+}
+
+impl PartialOrd for Intersection {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.t.partial_cmp(&other.t)
+    }
+}
+
+impl PartialEq for Intersection {
+    fn eq(&self, other: &Self) -> bool {
+        self.t == other.t
+    }
+}
+
+impl Eq for Intersection {}
+*/
 
 impl Shape {
     fn sphere(center: Vector3<f32>, radius: f32) -> Self {
         Self::Sphere { center, radius }
     }
 
-    fn intersect_ray(&self, o: &Vector3<f32>, d: &Vector3<f32>) -> Option<(Intersection, Intersection)> {
+    fn half_space(normal: Vector3<f32>, distance: f32) -> Self {
+        Self::HalfSpace { normal, distance }
+    }
+
+    fn union(self, other: Self) -> Self {
+        Self::Union(Box::new(self), Box::new(other))
+    }
+
+    fn intersection(self, other: Self) -> Self {
+        Self::Intersection(Box::new(self), Box::new(other))
+    }
+
+    fn difference(self, other: Self) -> Self {
+        Self::Difference(Box::new(self), Box::new(other))
+    }
+
+    fn intersect_ray(&self, o: &Vector3<f32>, d: &Vector3<f32>, t_min: f32, t_max: f32) -> Option<Intersection> {
+        self.intersect_ray_rec(o, d).into_iter().filter(|i| i.t > t_min && i.t < t_max && i.entering).next()
+    }
+
+    fn intersect_ray_rec(&self, o: &Vector3<f32>, d: &Vector3<f32>) -> Vec<Intersection> {
         // TODO something weird happens when the camera is inside the shape.
         match self {
             Self::Sphere { center, radius } => {
@@ -354,73 +423,161 @@ impl Shape {
                 let a = d.dot(d);
                 let b = 2. * co.dot(d);
                 let c = co.dot(&co) - radius * radius;
-                solve_quadratic(a, b, c).map(|(t1, t2)| (
-                        Intersection{ t: t1, normal: (o + t1 * d) - center},
-                        Intersection{ t: t2, normal: (o + t2 * d) - center},
-                ))
+                if let Some((t1, t2)) = solve_quadratic(a, b, c) {
+                    let t_min = t1.min(t2);
+                    let t_max = t1.max(t2);
+                    vec![
+                        Intersection{ t: t_min, normal: (o + t_min * d) - center, entering: true},
+                        Intersection{ t: t_max, normal: (o + t_max * d) - center, entering: false},
+                    ]
+                } else {
+                    vec![]
+                }
+            }
+            Self::HalfSpace { normal, distance } => {
+                let denom = d.dot(normal);
+                if denom != 0. {
+                    let t = (distance - o.dot(normal)) / d.dot(normal);
+                    if t > 0. {
+                        vec![Intersection { t, normal: *normal, entering: true }]
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                }
             }
             Self::Union(a, b) => {
-                // TODO handle non-contiguous
-                let intersect_a = a.intersect_ray(o, d);
-                let intersect_b = b.intersect_ray(o, d);
-                if let Some((ta1, ta2)) = intersect_a {
-                    if let Some((tb1, tb2)) = intersect_b {
-                        let t1 = ta1.min(&ta2).min(&tb1).min(&tb2);
-                        let t2 = ta1.max(&ta2).max(&tb1).max(&tb2);
-                        Some((*t1, *t2))
-                    } else {
-                        intersect_a
+                let mut intersections_a = a.intersect_ray_rec(o, d).into_iter().peekable();
+                let mut intersections_b = b.intersect_ray_rec(o, d).into_iter().peekable();
+
+                let mut result = vec![];
+                let mut in_a = false;
+                let mut in_b = false;
+                loop {
+                    let next_a = intersections_a.peek();
+                    let next_b = intersections_b.peek();
+
+                    if !next_a.is_some() && !next_b.is_some() {
+                        break;
                     }
-                } else {
-                    intersect_b
-                }
+
+                    if next_a.is_some() && (!next_b.is_some() || next_a.unwrap().t < next_b.unwrap().t) {
+                        let next_a = intersections_a.next().unwrap();
+                        if !in_b && in_a  && !next_a.entering {
+                            // was only in a, now in neither
+                            result.push(next_a);
+                        } else if !in_b && !in_a && next_a.entering {
+                            // was in neither, now in union
+                            result.push(next_a);
+                        }
+                        in_a = next_a.entering
+                    } else {
+                        let next_b = intersections_b.next().unwrap();
+                        if !in_a && in_b  && !next_b.entering {
+                            // was only in b, now in neither
+                            result.push(next_b);
+                        } else if !in_a && !in_b && next_b.entering {
+                            // was in neither, now in union
+                            result.push(next_b);
+                        }
+                        in_b = next_b.entering
+                    }
+                } 
+                result
             }
             Self::Intersection(a, b) => {
-                // TODO handle non-contiguous
-                let intersect_a = a.intersect_ray(o, d);
-                let intersect_b = b.intersect_ray(o, d);
-                if let Some((ta1, ta2)) = intersect_a {
-                    if let Some((tb1, tb2)) = intersect_b {
-                        let ta_min = ta1.min(&ta2);
-                        let ta_max = ta1.max(&ta2);
-                        let tb_min = tb1.min(&tb2);
-                        let tb_max = tb1.max(&tb2);
-                        Some((*ta_min.max(tb_min), *ta_max.min(tb_max)))
-                    } else {
-                        None
+                /*
+                let mut intersections_a = a.intersect_ray_rec(o, d).into_iter().peekable();
+                let mut intersections_b = b.intersect_ray_rec(o, d).into_iter().peekable();
+                */
+                let mut intersections_a = a.intersect_ray_rec(o, d);
+                let mut intersections_b = b.intersect_ray_rec(o, d);
+
+                //dbg!(&intersections_a);
+                //dbg!(&intersections_b);
+
+                let mut intersections_a = intersections_a.into_iter().peekable();
+                let mut intersections_b = intersections_b.into_iter().peekable();
+
+                let mut result = vec![];
+                let mut in_a = false;
+                let mut in_b = false;
+                loop {
+                    let next_a = intersections_a.peek();
+                    let next_b = intersections_b.peek();
+
+                    if !next_a.is_some() && !next_b.is_some() {
+                        break;
                     }
-                } else {
-                    None
-                }
+
+                    if next_a.is_some() && (!next_b.is_some() || next_a.unwrap().t < next_b.unwrap().t) {
+                        let next_a = intersections_a.next().unwrap();
+                        if in_a && in_b && !next_a.entering {
+                            // was in both, now in just b
+                            result.push(next_a);
+                        } else if in_b && !in_a && next_a.entering {
+                            // was in just b, now in both
+                            result.push(next_a)
+                        }
+                        in_a = next_a.entering
+                    } else {
+                        let next_b = intersections_b.next().unwrap();
+                        if in_b && in_a && !next_b.entering {
+                            // was in both, now in just a
+                            result.push(next_b);
+                        } else if in_a && !in_b && next_b.entering {
+                            // was in just a, now in both
+                            result.push(next_b)
+                        }
+                        in_b = next_b.entering
+                    }
+                } 
+                result
             }
             Self::Difference(a, b) => {
-                // TODO handle encapsulated properly (should return non-contiguous range)
-                let intersect_a = a.intersect_ray(o, d);
-                let intersect_b = b.intersect_ray(o, d);
-                if let Some((ta1, ta2)) = intersect_a {
-                    if let Some((mut tb1, mut tb2)) = intersect_b {
-                        // Inverted normals for subtracted object
-                        tb1.normal = -tb1.normal;
-                        tb2.normal = -tb2.normal;
-                        let ta_min = ta1.min(&ta2);
-                        let ta_max = ta1.max(&ta2);
-                        let tb_min = tb1.min(&tb2);
-                        let tb_max = tb1.max(&tb2);
-                        if ta_min.t < tb_min.t {
-                            Some((*ta_min, *tb_min))
-                        } else {
-                            Some((*tb_max, *ta_max))
-                        }
-                    } else {
-                        intersect_a
+                let mut intersections_a = a.intersect_ray_rec(o, d).into_iter().peekable();
+                let mut intersections_b = b.intersect_ray_rec(o, d).into_iter().peekable();
+
+                let mut result = vec![];
+                let mut in_a = false;
+                let mut in_b = false;
+                loop {
+                    let next_a = intersections_a.peek();
+                    let next_b = intersections_b.peek();
+
+                    if !next_a.is_some() && !next_b.is_some() {
+                        break;
                     }
-                } else {
-                    None
-                }
+
+                    if next_a.is_some() && (!next_b.is_some() || next_a.unwrap().t < next_b.unwrap().t) {
+                        let next_a = intersections_a.next().unwrap();
+                        if in_a && !in_b && !next_a.entering {
+                            // was in just a, now in neither
+                            result.push(next_a);
+                        } else if !in_b && !in_a && next_a.entering {
+                            // was in neither, now in just a
+                            result.push(next_a)
+                        }
+                        in_a = next_a.entering
+                    } else {
+                        let next_b = intersections_b.next().unwrap();
+                        if in_b && in_a && !next_b.entering {
+                            // was in both, now in just a
+                            result.push(next_b.invert());
+                        } else if in_a && !in_b && next_b.entering {
+                            // was in just a, now in both
+                            result.push(next_b.invert())
+                        }
+                        in_b = next_b.entering
+                    }
+                } 
+                result
             }
         }
     }
 }
+
 
 impl Object {
     fn new(shape: Shape, color: Vector3<f32>, specular: Option<f32>, reflection: f32, transparency: f32, refraction: f32) -> Self {
@@ -451,4 +608,71 @@ enum Light {
     Ambient(f32),
     Point(f32, Vector3<f32>),
     Directional(f32, Vector3<f32>),
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_difference() {
+        let death_star = Shape::Difference(
+            Box::new(Shape::sphere(Vector3::new(0., 0., 3.), 1.0)),
+            Box::new(Shape::sphere(Vector3::new(0., 0., 4.), 0.5)),
+        );
+
+        let intersections = death_star.intersect_ray_rec(&Vector3::new(0., 0., 0.), &Vector3::new(0., 0., 1.));
+        assert_eq!(
+            vec![
+                   Intersection{
+                       t: 2.,
+                       normal: Vector3::new(0., 0., -1.),
+                       entering: true,
+                   },
+                   Intersection{
+                       t: 3.5,
+                       normal: Vector3::new(0., 0., 0.5),
+                       entering: false,
+                   },
+            ],
+            intersections,
+        )
+    }
+
+    #[test]
+    fn test_plane_intersection() {
+        let planes = Shape::Intersection(
+            Box::new(Shape::half_space(Vector3::new(1., 0., 0.), -1.)),
+            Box::new(Shape::half_space(Vector3::new(0., 1., 0.), -1.)),
+        );
+        let planes = Shape::half_space(Vector3::new(1., 0., 0.), -1.);
+
+        let intersections = planes.intersect_ray_rec(&Vector3::new(0., 0., 0.), &Vector3::new(-1., 0., 1.));
+        let expected: Vec<Intersection> = vec![
+            Intersection {
+                t: 3.,
+                normal: Vector3::new(0., 1., 0.),
+                entering: true,
+            }
+        ];
+        assert_eq!(
+            expected,
+            intersections,
+        );
+
+        /*
+        let intersections = planes.intersect_ray_rec(&Vector3::new(0., 0., 0.), &Vector3::new(-1., 1., 1.));
+        let expected: Vec<Intersection> = vec![
+            Intersection{
+                t: 3.5,
+                normal: Vector3::new(0., 0., 0.5),
+                entering: false,
+            },
+        ];
+        assert_eq!(
+            expected,
+            intersections,
+        );
+        */
+    }
 }
