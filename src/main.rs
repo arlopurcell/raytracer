@@ -1,7 +1,6 @@
 use image::{Rgb, RgbImage};
 use nalgebra::{geometry::Rotation3, Vector3};
 use rayon::prelude::*;
-use std::cmp::Ordering;
 
 const VIEWPORT_WIDTH: f32 = 2.;
 const VIEWPORT_HEIGHT: f32 = 1.;
@@ -18,14 +17,10 @@ fn main() {
     );
 
     let mut scene = Scene::new(Vector3::new(0., 0., 0.));
-    /*
     // red
     scene.objects.push(Object::new(
-        //Shape::sphere(Vector3::new(0., -1., 3.), 1.0),
-        Shape::Difference(
-            Box::new(Shape::sphere(Vector3::new(0., -1., 3.), 1.0)),
-            Box::new(Shape::sphere(Vector3::new(0.3, -0.5, 2.5), 0.4)),
-        ),
+        Shape::sphere(Vector3::new(0., -1., 3.), 1.0)
+            .difference(Shape::sphere(Vector3::new(0.3, -0.5, 2.5), 0.4)),
         Vector3::new(1., 0., 0.),
         Some(500.),
         0.2,
@@ -95,38 +90,18 @@ fn main() {
         0.,
         1.33,
     ));
-    */
-
-        /*
-    scene.objects.push(Object::new(
-        Shape::sphere(Vector3::new(0., 0., 2.), 1.0),
-        Vector3::new(0., 0., 1.),
-        Some(500.),
-        0.3,
-        0.,
-        1.33,
-    ));
-    scene.objects.push(Object::new(
-        Shape::half_space(Vector3::new(1., 0., 0.).normalize(), 0.5),
-        Vector3::new(1., 1., 1.),
-        Some(500.),
-        0.3,
-        0.,
-        1.33,
-    ));
-    */
 
     // cube
     scene.objects.push(Object::new(
-        Shape::sphere(Vector3::new(0., 0., 2.), 9.)
-            .difference(Shape::half_space(Vector3::new(1., 0., 0.), -0.5))
-            .difference(Shape::half_space(Vector3::new(-1., 0., 0.), -0.5))
-            .difference(Shape::half_space(Vector3::new(0., 1., 0.), -0.5))
-            .difference(Shape::half_space(Vector3::new(0., -1., 0.), -0.5))
-            .difference(Shape::half_space(Vector3::new(0., 0., 1.), 1.5))
-            .difference(Shape::half_space(Vector3::new(0., 0., -1.), -2.5))
+            Shape::half_space(Vector3::new(0., 0., -1.), -3.)
+            .intersection(Shape::half_space(Vector3::new(1., 0., 0.), 2.))
+            .intersection(Shape::half_space(Vector3::new(-1., 0., 0.), 0.))
+            .intersection(Shape::half_space(Vector3::new(0., 1., 0.), 1.5))
+            .intersection(Shape::half_space(Vector3::new(0., -1., 0.), -0.5))
+            .intersection(Shape::half_space(Vector3::new(0., 0., 1.), 4.))
+            //.intersection(Shape::half_space(Vector3::new(0., 0., -1.), -0.5))
         ,
-        Vector3::new(1., 1., 0.),
+        Vector3::new(0., 1., 1.),
         Some(1000.),
         0.5,
         0.,
@@ -437,11 +412,16 @@ impl Shape {
             Self::HalfSpace { normal, distance } => {
                 let denom = d.dot(normal);
                 if denom != 0. {
-                    let t = (distance - o.dot(normal)) / d.dot(normal);
-                    if t > 0. {
-                        vec![Intersection { t, normal: *normal, entering: true }]
+                    let t = (distance - o.dot(normal)) / denom;
+                    if denom < 0. {
+                        vec![
+                            Intersection { t, normal: *normal, entering: true },
+                        ]
                     } else {
-                        vec![]
+                        vec![
+                            Intersection { t: -f32::INFINITY, normal: *normal, entering: true },
+                            Intersection { t, normal: *normal, entering: false },
+                        ]
                     }
                 } else {
                     vec![]
@@ -487,18 +467,8 @@ impl Shape {
                 result
             }
             Self::Intersection(a, b) => {
-                /*
                 let mut intersections_a = a.intersect_ray_rec(o, d).into_iter().peekable();
                 let mut intersections_b = b.intersect_ray_rec(o, d).into_iter().peekable();
-                */
-                let mut intersections_a = a.intersect_ray_rec(o, d);
-                let mut intersections_b = b.intersect_ray_rec(o, d);
-
-                //dbg!(&intersections_a);
-                //dbg!(&intersections_b);
-
-                let mut intersections_a = intersections_a.into_iter().peekable();
-                let mut intersections_b = intersections_b.into_iter().peekable();
 
                 let mut result = vec![];
                 let mut in_a = false;
@@ -641,19 +611,22 @@ mod test {
 
     #[test]
     fn test_plane_intersection() {
-        let planes = Shape::Intersection(
-            Box::new(Shape::half_space(Vector3::new(1., 0., 0.), -1.)),
-            Box::new(Shape::half_space(Vector3::new(0., 1., 0.), -1.)),
-        );
-        let planes = Shape::half_space(Vector3::new(1., 0., 0.), -1.);
+        let planes = Shape::half_space(Vector3::new(0., 0., -1.), -1.5)
+            .intersection(Shape::half_space(Vector3::new(1., 0., 0.), 0.5))
+            ;
 
         let intersections = planes.intersect_ray_rec(&Vector3::new(0., 0., 0.), &Vector3::new(-1., 0., 1.));
         let expected: Vec<Intersection> = vec![
             Intersection {
-                t: 3.,
-                normal: Vector3::new(0., 1., 0.),
+                t: 1.5,
+                normal: Vector3::new(0., 0., -1.),
                 entering: true,
-            }
+            },
+            Intersection {
+                t: 2.5,
+                normal: Vector3::new(0., 0., 1.),
+                entering: false,
+            },
         ];
         assert_eq!(
             expected,
