@@ -95,7 +95,7 @@ fn main() {
     scene.objects.push(Object::new(
             Shape::half_space(Vector3::new(0., 0., -1.), -3.)
             .intersection(Shape::half_space(Vector3::new(1., 0., 0.), 2.))
-            .intersection(Shape::half_space(Vector3::new(-1., 0., 0.), 0.))
+            .intersection(Shape::half_space(Vector3::new(-1., 0., 0.), -1.))
             .intersection(Shape::half_space(Vector3::new(0., 1., 0.), 1.5))
             .intersection(Shape::half_space(Vector3::new(0., -1., 0.), -0.5))
             .intersection(Shape::half_space(Vector3::new(0., 0., 1.), 4.))
