@@ -17,6 +17,7 @@ fn main() {
     );
 
     let mut scene = Scene::new(Vector3::new(0., 0., 0.));
+
     // red
     scene.objects.push(Object::new(
         Shape::sphere(Vector3::new(0., -1., 3.), 1.0)
@@ -93,13 +94,9 @@ fn main() {
 
     // cube
     scene.objects.push(Object::new(
-            Shape::half_space(Vector3::new(0., 0., -1.), -3.)
-            .intersection(Shape::half_space(Vector3::new(1., 0., 0.), 2.))
-            .intersection(Shape::half_space(Vector3::new(-1., 0., 0.), -1.))
-            .intersection(Shape::half_space(Vector3::new(0., 1., 0.), 1.5))
-            .intersection(Shape::half_space(Vector3::new(0., -1., 0.), -0.5))
-            .intersection(Shape::half_space(Vector3::new(0., 0., 1.), 4.))
-            //.intersection(Shape::half_space(Vector3::new(0., 0., -1.), -0.5))
+            Shape::cube(1.)
+                .rotate_around_origin(&Rotation3::from_euler_angles(0.5, 0.5, 0.5))
+                .translate(&Vector3::new(2., 1.7, 4.))
         ,
         Vector3::new(0., 1., 1.),
         Some(1000.),
@@ -342,28 +339,6 @@ impl Intersection {
     }
 }
 
-/*
-impl Ord for Intersection {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.t.partial_cmp(&other.t).unwrap_or(Ordering::Equal)
-    }
-}
-
-impl PartialOrd for Intersection {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.t.partial_cmp(&other.t)
-    }
-}
-
-impl PartialEq for Intersection {
-    fn eq(&self, other: &Self) -> bool {
-        self.t == other.t
-    }
-}
-
-impl Eq for Intersection {}
-*/
-
 impl Shape {
     fn sphere(center: Vector3<f32>, radius: f32) -> Self {
         Self::Sphere { center, radius }
@@ -371,6 +346,15 @@ impl Shape {
 
     fn half_space(normal: Vector3<f32>, distance: f32) -> Self {
         Self::HalfSpace { normal, distance }
+    }
+
+    fn cube(side_len: f32) -> Self {
+        Shape::half_space(Vector3::new(0., 0., -1.), 0.5 * side_len)
+            .intersection(Shape::half_space(Vector3::new(0., 0., 1.), 0.5 * side_len))
+            .intersection(Shape::half_space(Vector3::new(1., 0., 0.), 0.5 * side_len))
+            .intersection(Shape::half_space(Vector3::new(-1., 0., 0.), 0.5 * side_len))
+            .intersection(Shape::half_space(Vector3::new(0., 1., 0.), 0.5 * side_len))
+            .intersection(Shape::half_space(Vector3::new(0., -1., 0.), 0.5 * side_len))
     }
 
     fn union(self, other: Self) -> Self {
@@ -383,6 +367,57 @@ impl Shape {
 
     fn difference(self, other: Self) -> Self {
         Self::Difference(Box::new(self), Box::new(other))
+    }
+
+    fn translate(self, translation: &Vector3<f32>) -> Self {
+        match self {
+            Self::Sphere { center, radius } => Self::Sphere { center: center + translation, radius },
+            Self::HalfSpace { normal, distance } => Self::HalfSpace { normal, distance: distance + translation.dot(&normal) },
+            Self::Union(mut a, mut b) => {
+                *a = a.translate(translation);
+                *b = b.translate(translation);
+                Self::Union(a, b)
+            },
+            Self::Intersection(mut a, mut b) => {
+                *a = a.translate(translation);
+                *b = b.translate(translation);
+                Self::Intersection(a, b)
+            },
+            Self::Difference(mut a, mut b) => {
+                *a = a.translate(translation);
+                *b = b.translate(translation);
+                Self::Difference(a, b)
+            },
+        }
+    }
+
+    fn rotate_around_origin(self, rotation: &Rotation3<f32>) -> Self {
+        match self {
+            Self::Sphere { center, radius } => Self::Sphere { center, radius },
+            Self::HalfSpace { normal, distance } => Self::HalfSpace { normal: rotation * normal, distance },
+            Self::Union(mut a, mut b) => {
+                *a = a.rotate_around_origin(rotation);
+                *b = b.rotate_around_origin(rotation);
+                Self::Union(a, b)
+            }
+            Self::Intersection(mut a, mut b) => {
+                *a = a.rotate_around_origin(rotation);
+                *b = b.rotate_around_origin(rotation);
+                Self::Intersection(a, b)
+            }
+            Self::Difference(mut a, mut b) => {
+                *a = a.rotate_around_origin(rotation);
+                *b = b.rotate_around_origin(rotation);
+                Self::Difference(a, b)
+            }
+        }
+    }
+
+    fn rotate_around_point(self, rotation: &Rotation3<f32>, point: &Vector3<f32>) -> Self {
+        self
+            .translate(&-point)
+            .rotate_around_origin(rotation)
+            .translate(point)
     }
 
     fn intersect_ray(&self, o: &Vector3<f32>, d: &Vector3<f32>, t_min: f32, t_max: f32) -> Option<Intersection> {
