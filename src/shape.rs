@@ -17,13 +17,17 @@ impl Shape {
         Self::HalfSpace { normal, distance }
     }
 
-    pub fn cube(side_len: f32) -> Self {
-        Shape::half_space(Vector3::new(0., 0., -1.), 0.5 * side_len)
-            .intersection(Shape::half_space(Vector3::new(0., 0., 1.), 0.5 * side_len))
-            .intersection(Shape::half_space(Vector3::new(1., 0., 0.), 0.5 * side_len))
-            .intersection(Shape::half_space(Vector3::new(-1., 0., 0.), 0.5 * side_len))
-            .intersection(Shape::half_space(Vector3::new(0., 1., 0.), 0.5 * side_len))
-            .intersection(Shape::half_space(Vector3::new(0., -1., 0.), 0.5 * side_len))
+    pub fn rectangular_prism(width: f32, height: f32, depth: f32) -> Self {
+        Shape::half_space(Vector3::new(0., 0., -1.), 0.5 * depth)
+            .intersection(Shape::half_space(Vector3::new(0., 0., 1.), 0.5 * depth))
+            .intersection(Shape::half_space(Vector3::new(1., 0., 0.), 0.5 * width))
+            .intersection(Shape::half_space(Vector3::new(-1., 0., 0.), 0.5 * width))
+            .intersection(Shape::half_space(Vector3::new(0., 1., 0.), 0.5 * height))
+            .intersection(Shape::half_space(Vector3::new(0., -1., 0.), 0.5 * height))
+    }
+
+    pub fn cube(side_length: f32) -> Self {
+        Self::rectangular_prism(side_length, side_length, side_length)
     }
 
     pub fn union(self, other: Self) -> Self {
