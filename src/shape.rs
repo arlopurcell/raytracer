@@ -1,8 +1,10 @@
-use nalgebra::{geometry::Rotation3, Vector3};
+use nalgebra::{geometry::Rotation3, Vector3, Matrix4, Translation3, Transform3, Point3, Vector4};
 
+#[derive(Debug, PartialEq)]
 pub enum Shape {
     Sphere { center: Vector3<f32>, radius: f32 },
     HalfSpace { normal: Vector3<f32>, distance: f32 },
+    Quadric(Matrix4<f32>),
     Union(Box<Shape>, Box<Shape>),
     Intersection(Box<Shape>, Box<Shape>),
     Difference(Box<Shape>, Box<Shape>),
@@ -10,7 +12,13 @@ pub enum Shape {
 
 impl Shape {
     pub fn sphere(center: Vector3<f32>, radius: f32) -> Self {
-        Self::Sphere { center, radius }
+        //Self::Sphere { center, radius }
+        Self::Quadric(Matrix4::new(
+                1., 0., 0., 0.,
+                0., 1., 0., 0.,
+                0., 0., 1., 0.,
+                0., 0., 0., -(radius * radius),
+        )).translate(&center)
     }
 
     pub fn half_space(normal: Vector3<f32>, distance: f32) -> Self {
@@ -46,6 +54,12 @@ impl Shape {
         match self {
             Self::Sphere { center, radius } => Self::Sphere { center: center + translation, radius },
             Self::HalfSpace { normal, distance } => Self::HalfSpace { normal, distance: distance + translation.dot(&normal) },
+            Self::Quadric(matrix) => {
+                let translation: Translation3<f32> = (-*translation).into();
+                let transform: Transform3<f32> = nalgebra::convert(translation);
+                let transform_matrix: Matrix4<f32> = transform.into_inner();
+                Self::Quadric(transform_matrix.transpose() * matrix * transform_matrix)
+            }
             Self::Union(mut a, mut b) => {
                 *a = a.translate(translation);
                 *b = b.translate(translation);
@@ -68,6 +82,11 @@ impl Shape {
         match self {
             Self::Sphere { center, radius } => Self::Sphere { center, radius },
             Self::HalfSpace { normal, distance } => Self::HalfSpace { normal: rotation * normal, distance },
+            Self::Quadric(matrix) => {
+                let transform: Transform3<f32> = nalgebra::convert(*rotation);
+                let transform_matrix: Matrix4<f32> = transform.into_inner();
+                Self::Quadric(transform_matrix.transpose() * matrix * transform_matrix)
+            }
             Self::Union(mut a, mut b) => {
                 *a = a.rotate_around_origin(rotation);
                 *b = b.rotate_around_origin(rotation);
@@ -131,6 +150,29 @@ impl Shape {
                             Intersection { t, normal: *normal, entering: false },
                         ]
                     }
+                } else {
+                    vec![]
+                }
+            }
+            Self::Quadric(matrix) => {
+                let d = d.to_homogeneous();
+                let o = Point3::new(o.x, o.y, o.z).to_homogeneous();
+
+                let qd = matrix * d;
+                let qo = matrix * o;
+                let a = d.dot(&qd);
+                let b = o.dot(&qd) + d.dot(&qo);
+                let c = o.dot(&qo);
+                if let Some((t1, t2)) = solve_quadratic(a, b, c) {
+                    let t_min = t1.min(t2);
+                    let t_max = t1.max(t2);
+
+                    let point_min = o + t_min * d;
+                    let point_max = o + t_max * d;
+                    vec![
+                        Intersection{ t: t_min, normal: quadric_normal(&point_min, matrix), entering: true},
+                        Intersection{ t: t_max, normal: quadric_normal(&point_max, matrix), entering: false},
+                    ]
                 } else {
                     vec![]
                 }
@@ -281,3 +323,139 @@ fn solve_quadratic(a: f32, b: f32, c: f32) -> Option<(f32, f32)>  {
     }
 }
 
+fn quadric_normal(point: &Vector4<f32>, matrix: &Matrix4<f32>) -> Vector3<f32> {
+    let x = (matrix[(0,0)] + matrix[(0,0)]) * point.x + (matrix[(0,1)] + matrix[(1,0)]) * point.y + (matrix[(0,2)] + matrix[(2,0)]) * point.z + matrix[(0,3)] + matrix[(3,0)];
+    let y = (matrix[(1,0)] + matrix[(0,1)]) * point.x + (matrix[(1,1)] + matrix[(1,1)]) * point.y + (matrix[(1,2)] + matrix[(2,1)]) * point.z + matrix[(1,3)] + matrix[(3,1)];
+    let z = (matrix[(2,0)] + matrix[(0,2)]) * point.x + (matrix[(2,1)] + matrix[(1,2)]) * point.y + (matrix[(2,2)] + matrix[(2,2)]) * point.z + matrix[(2,3)] + matrix[(3,2)];
+    Vector3::new(x, y, z).normalize()
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_quadric_sphere_origin() {
+        let quadric = Shape::Quadric(Matrix4::new(
+                1., 0., 0., 0.,
+                0., 1., 0., 0.,
+                0., 0., 1., 0.,
+                0., 0., 0., -1.,
+        ));
+        let sphere = Shape::Sphere{center: Vector3::new(0., 0., 0.), radius: 1.};
+
+        let camera = Vector3::new(0., 0., -3.);
+        let d = Vector3::new(0., 0., 1.);
+
+        let quadric_intersections = quadric.intersect_ray_rec(&camera, &d);
+        assert_eq!(quadric_intersections.len(), 2);
+        let sphere_intersections = sphere.intersect_ray_rec(&camera, &d);
+        assert_eq!(quadric_intersections, sphere_intersections);
+    }
+
+    #[test]
+    fn test_matrix_indexing() {
+        let m = Matrix4::new(
+            1, 2, 3, 4,
+            5, 6, 7, 8,
+            9, 10, 11, 12,
+            13, 14, 15, 16,
+        );
+
+        assert_eq!(1, m[(0,0)]);
+        assert_eq!(6, m[(1,1)]);
+        assert_eq!(16, m[(3,3)]);
+
+        assert_eq!(2, m[(0,1)]);
+        assert_eq!(10, m[(2,1)]);
+
+    }
+
+    /*
+    #[test]
+    fn test_quadric_sphere_origin_angled() {
+        let quadric = Shape::Quadric(Matrix4::new(
+                1., 0., 0., 0.,
+                0., 1., 0., 0.,
+                0., 0., 1., 0.,
+                0., 0., 0., -1.,
+        ));
+        let sphere = Shape::Sphere{center: Vector3::new(0., 0., 0.), radius: 1.};
+        let camera = Vector3::new(0., 0., -2.);
+        let d = Vector3::new(0.2, 0.2, 1.);
+        let quadric_intersections = quadric.intersect_ray_rec(&camera, &d);
+        assert_eq!(quadric_intersections.len(), 2);
+        let sphere_intersections = sphere.intersect_ray_rec(&camera, &d);
+        assert_eq!(quadric_intersections, sphere_intersections);
+    }
+    */
+
+    #[test]
+    fn test_quadric_translation_identity() {
+        let translation = Vector3::new(0., 0., 0.);
+        let translation: Translation3<f32> = translation.into();
+        let transform: Transform3<f32> = nalgebra::convert(translation);
+        let transform_matrix: Matrix4<f32> = transform.into_inner();
+        assert_eq!(transform_matrix, 
+                   Matrix4::new(
+                       1., 0., 0., 0.,
+                       0., 1., 0., 0.,
+                       0., 0., 1., 0.,
+                       0., 0., 0., 1.,
+                    ));
+
+        let matrix = Matrix4::new(
+            1., 0., 0., 0.,
+            0., 1., 0., 0.,
+            0., 0., 1., 0.,
+            0., 0., 0., -1.,
+        );
+        assert_eq!(matrix, transform_matrix.transpose() * matrix * transform_matrix);
+    }
+
+    #[test]
+    fn test_quadric_translation() {
+        let translation = Vector3::new(1., 1., -1.);
+        //assert_eq!(Vector3::new(1., 1., -1.).to_homogeneous(), transform_matrix * Vector3::new(0., 0., 0.).to_homogeneous());
+        //assert_eq!(Vector3::new(3., 4., 3.).to_homogeneous(), transform_matrix * Vector3::new(2., 3., 4.).to_homogeneous());
+
+        let quadric = Shape::Quadric(Matrix4::new(
+            1., 0., 0., 0.,
+            0., 1., 0., 0.,
+            0., 0., 1., 0.,
+            0., 0., 0., -1.,
+        ));
+        let transformed_quadric = Shape::Quadric(Matrix4::new(
+            1., 0., 0., -1.,
+            0., 1., 0., -1.,
+            0., 0., 1., 1.,
+            -1., -1., 1., 2.,
+        ));
+        assert_eq!(transformed_quadric, quadric.translate(&translation));
+    }
+
+    #[test]
+    fn test_quadric_normal() {
+        let quadric_ds = Shape::sphere(Vector3::new(0., 0., 3.), 1.0)
+                .difference(Shape::sphere(Vector3::new(0.3, 0.5, 2.5), 0.4));
+
+        let sphere_ds = Shape::Sphere{center: Vector3::new(0., 0., 3.), radius: 1.}
+                .difference(Shape::Sphere{center: Vector3::new(0.3, 0.5, 2.5), radius: 0.4});
+
+        let camera = Vector3::new(0., 0., 0.);
+        let d = Vector3::new(0., 0., 1.);
+
+        let quadric_intersections = quadric_ds.intersect_ray_rec(&camera, &d);
+        assert_eq!(quadric_intersections.len(), 2);
+        let sphere_intersections = sphere_ds.intersect_ray_rec(&camera, &d);
+        assert_eq!(quadric_intersections, sphere_intersections);
+
+        let camera = Vector3::new(0., 0., 0.);
+        let d = Vector3::new(0.3, 0.5, 2.5); // look at cut out
+
+        let quadric_intersections = quadric_ds.intersect_ray_rec(&camera, &d);
+        assert_eq!(quadric_intersections.len(), 2);
+        let sphere_intersections = sphere_ds.intersect_ray_rec(&camera, &d);
+        assert_eq!(quadric_intersections, sphere_intersections);
+    }
+}

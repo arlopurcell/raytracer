@@ -120,6 +120,31 @@ impl Scene {
         scene
     }
 
+    pub fn quadrics() -> Self {
+        let mut scene = Scene::new(Vector3::new(0., 0., 0.));
+
+        // red
+        scene.objects.push(Object::new(
+                Shape::sphere(Vector3::new(0., -1., 3.), 1.0)
+                .difference(Shape::sphere(Vector3::new(0.3, -0.5, 2.5), 0.4)),
+                Vector3::new(1., 0., 0.),
+                Some(500.),
+                0.2,
+                0.,
+                1.33,
+                ));
+
+        scene.lights.push(Light::Ambient(0.2));
+        scene
+            .lights
+            .push(Light::Point(0.6, Vector3::new(2., 1., 0.)));
+        scene
+            .lights
+            .push(Light::Directional(0.2, Vector3::new(1., 4., 4.)));
+
+        scene
+    }
+
     pub fn trace_ray(
         &self,
         o: &Vector3<f32>,

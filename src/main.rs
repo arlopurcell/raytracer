@@ -22,7 +22,7 @@ fn main() {
         &Vector3::new(0., 1., 0.),   // up
     );
 
-    let scene = Scene::sample_scene_1();
+    let scene = Scene::quadrics();
 
     let mut pixels = Vec::new();
     for x in -CANVAS_WIDTH / 2..CANVAS_WIDTH / 2 {
