@@ -1,4 +1,4 @@
-use nalgebra::{geometry::Rotation3, Vector3};
+use nalgebra::{geometry::Rotation3, Vector3, Point3, Matrix4};
 
 use crate::object::{Object, Light};
 use crate::shape::{Intersection, Shape};
@@ -24,8 +24,8 @@ impl Scene {
 
         // red
         scene.objects.push(Object::new(
-                Shape::sphere(Vector3::new(0., -1., 3.), 1.0)
-                .difference(Shape::sphere(Vector3::new(0.3, -0.5, 2.5), 0.4)),
+                Shape::sphere(Point3::new(0., -1., 3.), 1.0)
+                .difference(Shape::sphere(Point3::new(0.3, -0.5, 2.5), 0.4)),
                 Vector3::new(1., 0., 0.),
                 Some(500.),
                 0.2,
@@ -35,7 +35,7 @@ impl Scene {
 
         // blue
         scene.objects.push(Object::new(
-                Shape::sphere(Vector3::new(2., 0., 4.), 1.0),
+                Shape::sphere(Point3::new(2., 0., 4.), 1.0),
                 Vector3::new(0., 0., 1.),
                 Some(500.),
                 0.3,
@@ -46,8 +46,8 @@ impl Scene {
         // green
         scene.objects.push(Object::new(
                 Shape::Intersection(
-                    Box::new(Shape::sphere(Vector3::new(-2., 0., 4.), 1.0)),
-                    Box::new(Shape::sphere(Vector3::new(-3., 0., 3.), 1.0)),
+                    Box::new(Shape::sphere(Point3::new(-2., 0., 4.), 1.0)),
+                    Box::new(Shape::sphere(Point3::new(-3., 0., 3.), 1.0)),
                     ),
                     Vector3::new(0., 1., 0.),
                     Some(10.),
@@ -68,7 +68,7 @@ impl Scene {
 
         // clear ball
         scene.objects.push(Object::new(
-                Shape::sphere(Vector3::new(0.75, -0.5, 1.8), 0.25),
+                Shape::sphere(Point3::new(0.75, -0.5, 1.8), 0.25),
                 Vector3::new(1., 1., 1.),
                 Some(10.),
                 0.0,
@@ -78,7 +78,7 @@ impl Scene {
 
         // clear ball stand
         scene.objects.push(Object::new(
-                Shape::sphere(Vector3::new(0.75, -1.75, 1.8), 1.),
+                Shape::sphere(Point3::new(0.75, -1.75, 1.8), 1.),
                 Vector3::new(1., 0.6, 0.),
                 Some(10.),
                 0.0,
@@ -88,7 +88,7 @@ impl Scene {
 
         // mirror ball
         scene.objects.push(Object::new(
-                Shape::sphere(Vector3::new(-1.5, 1., 6.), 2.),
+                Shape::sphere(Point3::new(-1.5, 1., 6.), 2.),
                 Vector3::new(1., 1., 1.),
                 Some(10.),
                 0.9,
@@ -112,7 +112,39 @@ impl Scene {
         scene.lights.push(Light::Ambient(0.2));
         scene
             .lights
-            .push(Light::Point(0.6, Vector3::new(2., 1., 0.)));
+            .push(Light::Point(0.6, Point3::new(2., 1., 0.)));
+        scene
+            .lights
+            .push(Light::Directional(0.2, Vector3::new(1., 4., 4.)));
+
+        scene
+    }
+
+    pub fn test_quadrics() -> Self {
+        let mut scene = Scene::new(Vector3::new(0., 0., 0.));
+
+        scene.objects.push(Object::new(
+                /*
+                Shape::Quadric(Matrix4::new(
+                        1., 0., 0., -1.,
+                        0., 1., 0., -1.,
+                        0., 0., 1., 1.,
+                        -1., -1., 1., 2.,
+                        )),
+                        */
+                Shape::sphere(Point3::new(1., 1., 1.), 1.),
+                //Shape::Sphere{center: Point3::new(1., 1., -1.), radius: 1.},
+                Vector3::new(0., 1., 1.),
+                Some(1000.),
+                0.5,
+                0.,
+                1.33,
+            ));
+
+        scene.lights.push(Light::Ambient(0.2));
+        scene
+            .lights
+            .push(Light::Point(0.6, Point3::new(2., 1., 0.)));
         scene
             .lights
             .push(Light::Directional(0.2, Vector3::new(1., 4., 4.)));
@@ -122,7 +154,7 @@ impl Scene {
 
     pub fn trace_ray(
         &self,
-        o: &Vector3<f32>,
+        o: &Point3<f32>,
         d: &Vector3<f32>,
         t_min: f32,
         t_max: f32,
@@ -148,7 +180,7 @@ impl Scene {
                     let refracted_term = if object.transparency > 0. {
                         let r = refraction / object.refraction;
                         let c = (-n).dot(d);
-                        let refraction_direction =  r * d + (r * c - (1.- r*r * (1. - c*c))) * n;
+                        let refraction_direction =  r * d + (r * c - (1.- r*r * (1. - c*c))) * n.as_ref();
 
                         let refracted_color = self.trace_ray(&p, &refraction_direction, 0.001, f32::INFINITY, object.refraction, depth - 1);
                         refracted_color * object.transparency
@@ -166,7 +198,7 @@ impl Scene {
     fn compute_lighting(
         &self,
         specular: &Option<f32>,
-        p: &Vector3<f32>,
+        p: &Point3<f32>,
         n: &Vector3<f32>,
         v: &Vector3<f32>,
     ) -> f32 {
@@ -188,7 +220,7 @@ impl Scene {
 
     fn closest_intersection(
         &self,
-        o: &Vector3<f32>,
+        o: &Point3<f32>,
         d: &Vector3<f32>,
         t_min: f32,
         t_max: f32,
@@ -219,7 +251,7 @@ impl Scene {
         &self,
         i: &f32,
         specular: &Option<f32>,
-        p: &Vector3<f32>,
+        p: &Point3<f32>,
         n: &Vector3<f32>,
         l: &Vector3<f32>,
         v: &Vector3<f32>,

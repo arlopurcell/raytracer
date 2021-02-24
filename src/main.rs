@@ -3,7 +3,7 @@ mod shape;
 mod scene;
 
 use image::{Rgb, RgbImage};
-use nalgebra::{geometry::Rotation3, Vector3};
+use nalgebra::{geometry::Rotation3, Vector3, Point3};
 use rayon::prelude::*;
 
 use crate::scene::Scene;
@@ -16,7 +16,7 @@ const CANVAS_WIDTH: i32 = 1800;
 const CANVAS_HEIGHT: i32 = 800;
 
 fn main() {
-    let camera = Vector3::new(0., 0., -1.);
+    let camera = Point3::new(0., 0., -1.);
     let camera_rotation = Rotation3::face_towards(
         &Vector3::new(0., 0., 1.), // direction
         &Vector3::new(0., 1., 0.),   // up

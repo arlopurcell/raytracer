@@ -1,4 +1,4 @@
-use nalgebra::Vector3;
+use nalgebra::{Vector3, Point3};
 
 use crate::shape::Shape;
 
@@ -29,7 +29,7 @@ impl Object {
 
 pub enum Light {
     Ambient(f32),
-    Point(f32, Vector3<f32>),
+    Point(f32, Point3<f32>),
     Directional(f32, Vector3<f32>),
 }
 
