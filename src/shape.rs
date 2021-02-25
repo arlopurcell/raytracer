@@ -12,13 +12,42 @@ pub enum Shape {
 
 impl Shape {
     pub fn sphere(center: Vector3<f32>, radius: f32) -> Self {
-        //Self::Sphere { center, radius }
         Self::Quadric(Matrix4::new(
                 1., 0., 0., 0.,
                 0., 1., 0., 0.,
                 0., 0., 1., 0.,
                 0., 0., 0., -(radius * radius),
         )).translate(&center)
+    }
+
+    pub fn inf_cylinder(radius: f32) -> Self {
+        Self::Quadric(Matrix4::new(
+                1., 0., 0., 0.,
+                0., 0., 0., 0.,
+                0., 0., 1., 0.,
+                0., 0., 0., -(radius * radius),
+        ))
+    }
+
+    pub fn cylinder(radius: f32, height: f32) -> Self {
+        Self::inf_cylinder(radius)
+            .intersection(Self::half_space(Vector3::new(0., 1., 0.), height/2.))
+            .intersection(Self::half_space(Vector3::new(0., -1., 0.), height/2.))
+    }
+
+    pub fn inf_cone(slope: f32) -> Self {
+        Self::Quadric(Matrix4::new(
+                1., 0., 0., 0.,
+                0., -slope, 0., 0.,
+                0., 0., 1., 0.,
+                0., 0., 0., 0.,
+        ))
+    }
+
+    pub fn cone(slope: f32, height: f32) -> Self {
+        Self::inf_cone(slope)
+            .intersection(Self::half_space(Vector3::new(0., 1., 0.), height))
+            .intersection(Self::half_space(Vector3::new(0., -1., 0.), 0.))
     }
 
     pub fn half_space(normal: Vector3<f32>, distance: f32) -> Self {
@@ -129,8 +158,8 @@ impl Shape {
                     let t_min = t1.min(t2);
                     let t_max = t1.max(t2);
                     vec![
-                        Intersection{ t: t_min, normal: (o + t_min * d) - center, entering: true},
-                        Intersection{ t: t_max, normal: (o + t_max * d) - center, entering: false},
+                        Intersection{ t: t_min, normal: ((o + t_min * d) - center).normalize(), entering: true},
+                        Intersection{ t: t_max, normal: ((o + t_max * d) - center).normalize(), entering: false},
                     ]
                 } else {
                     vec![]
@@ -436,26 +465,25 @@ mod test {
 
     #[test]
     fn test_quadric_normal() {
-        let quadric_ds = Shape::sphere(Vector3::new(0., 0., 3.), 1.0)
-                .difference(Shape::sphere(Vector3::new(0.3, 0.5, 2.5), 0.4));
+        let quadric_ds = Shape::sphere(Vector3::new(0., -1., 3.), 1.0)
+                .difference(Shape::sphere(Vector3::new(0.3, -0.5, 2.5), 0.4));
 
-        let sphere_ds = Shape::Sphere{center: Vector3::new(0., 0., 3.), radius: 1.}
-                .difference(Shape::Sphere{center: Vector3::new(0.3, 0.5, 2.5), radius: 0.4});
-
-        let camera = Vector3::new(0., 0., 0.);
-        let d = Vector3::new(0., 0., 1.);
-
-        let quadric_intersections = quadric_ds.intersect_ray_rec(&camera, &d);
-        assert_eq!(quadric_intersections.len(), 2);
-        let sphere_intersections = sphere_ds.intersect_ray_rec(&camera, &d);
-        assert_eq!(quadric_intersections, sphere_intersections);
+        let sphere_ds = Shape::Sphere{center: Vector3::new(0., -1., 3.), radius: 1.}
+                .difference(Shape::Sphere{center: Vector3::new(0.3, -0.5, 2.5), radius: 0.4});
 
         let camera = Vector3::new(0., 0., 0.);
-        let d = Vector3::new(0.3, 0.5, 2.5); // look at cut out
+        for i in -10..10 {
+            for j in -20..0 {
+                let d = Vector3::new(i as f32 / 10., j as f32 / 10., 1.);
 
-        let quadric_intersections = quadric_ds.intersect_ray_rec(&camera, &d);
-        assert_eq!(quadric_intersections.len(), 2);
-        let sphere_intersections = sphere_ds.intersect_ray_rec(&camera, &d);
-        assert_eq!(quadric_intersections, sphere_intersections);
+                let quadric_intersections = quadric_ds.intersect_ray_rec(&camera, &d);
+                let sphere_intersections = sphere_ds.intersect_ray_rec(&camera, &d);
+                for (qi, si) in quadric_intersections.into_iter().zip(sphere_intersections) {
+                    assert!((qi.t - si.t).abs() < 0.001);
+                    assert!((qi.normal - si.normal).magnitude() < 0.01);
+                    assert_eq!(qi.entering, si.entering);
+                }
+            }
+        }
     }
 }

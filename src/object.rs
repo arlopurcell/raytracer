@@ -11,9 +11,6 @@ pub struct Object {
     pub refraction: f32,
 }
 
-
-
-
 impl Object {
     pub fn new(shape: Shape, color: Vector3<f32>, specular: Option<f32>, reflection: f32, transparency: f32, refraction: f32) -> Self {
         Self {

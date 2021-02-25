@@ -35,7 +35,10 @@ impl Scene {
 
         // blue
         scene.objects.push(Object::new(
-                Shape::sphere(Vector3::new(2., 0., 4.), 1.0),
+                //Shape::sphere(Vector3::new(2., 0., 4.), 1.0),
+                Shape::cylinder(0.5, 1.)
+                    .rotate_around_origin(&Rotation3::from_euler_angles(0.2, 0.4, 0.))
+                    .translate(&Vector3::new(2., -0.2, 4.)),
                 Vector3::new(0., 0., 1.),
                 Some(500.),
                 0.3,
@@ -78,7 +81,10 @@ impl Scene {
 
         // clear ball stand
         scene.objects.push(Object::new(
-                Shape::sphere(Vector3::new(0.75, -1.75, 1.8), 1.),
+                //Shape::sphere(Vector3::new(0.75, -1.75, 1.8), 1.),
+                Shape::cone(1., 0.25)
+                    .rotate_around_origin(&Rotation3::from_euler_angles(std::f32::consts::PI, 0., 0.))
+                    .translate(&Vector3::new(0.75, -0.75, 1.8)),
                 Vector3::new(1., 0.6, 0.),
                 Some(10.),
                 0.0,
@@ -100,7 +106,7 @@ impl Scene {
         scene.objects.push(Object::new(
                 Shape::cube(1.)
                 .rotate_around_origin(&Rotation3::from_euler_angles(0.5, 0.5, 0.5))
-                .translate(&Vector3::new(2., 1.7, 4.))
+                .translate(&Vector3::new(2., 1.2, 4.))
                 ,
                 Vector3::new(0., 1., 1.),
                 Some(1000.),
@@ -125,11 +131,13 @@ impl Scene {
 
         // red
         scene.objects.push(Object::new(
-                Shape::sphere(Vector3::new(0., -1., 3.), 1.0)
-                .difference(Shape::sphere(Vector3::new(0.3, -0.5, 2.5), 0.4)),
+                Shape::cone(0.5, 1.)
+                    .translate(&Vector3::new(0., 0., 3.)),
                 Vector3::new(1., 0., 0.),
                 Some(500.),
+                //None,
                 0.2,
+                //0.,
                 0.,
                 1.33,
                 ));
